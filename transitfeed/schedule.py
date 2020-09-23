@@ -113,10 +113,10 @@ class Schedule(object):
   def ConnectDb(self, memory_db):
     def connector(db_file):
       if native_sqlite:
-        return sqlite.connect(db_file)
+        return sqlite.connect(db_file, check_same_thread=False)
       else:
         return sqlite.connect("jdbc:sqlite:%s" % db_file,
-                              "", "", "org.sqlite.JDBC")
+                              "", "", "org.sqlite.JDBC", check_same_thread=False)
 
     if memory_db:
       self._connection = connector(":memory:")
