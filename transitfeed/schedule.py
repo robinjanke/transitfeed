@@ -19,6 +19,8 @@ import bisect
 import datetime
 import itertools
 import os
+from flask import g, app
+
 try:
   import sqlite3 as sqlite
   native_sqlite = True
@@ -110,13 +112,21 @@ class Schedule(object):
     if hasattr(self, '_temp_db_filename'):
       os.remove(self._temp_db_filename)
 
+  @app.teardown_appcontext
+  def close_connection(exception):
+    db = getattr(g, '_database', None)
+    if db is not None:
+      db.close()
+
   def ConnectDb(self, memory_db):
     def connector(db_file):
-      if native_sqlite:
-        return sqlite.connect(db_file, check_same_thread=False)
-      else:
-        return sqlite.connect("jdbc:sqlite:%s" % db_file,
-                              "", "", "org.sqlite.JDBC", check_same_thread=False)
+      db = getattr(g, '_database', None)
+      if db is None:
+        if native_sqlite:
+          db = sqlite.connect(db_file, check_same_thread=False)
+        else:
+          db = sqlite.connect("jdbc:sqlite:%s" % db_file, "", "", "org.sqlite.JDBC", check_same_thread=False)
+      return db
 
     if memory_db:
       self._connection = connector(":memory:")
@@ -1248,7 +1258,7 @@ class Schedule(object):
             # If the serivce_id_pair_key is not in the cache, we do the
             # full service period comparison
             if service_id_pair_key not in service_period_overlap_cache:
-              
+
               # If the trip references an unknown service id, then we bail,
               # since we can't effectively determine block overlap and an
               # error will have already been registered for the missing
