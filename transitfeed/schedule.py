@@ -112,12 +112,6 @@ class Schedule(object):
     if hasattr(self, '_temp_db_filename'):
       os.remove(self._temp_db_filename)
 
-  @app.teardown_appcontext
-  def close_connection(exception):
-    db = getattr(g, '_database', None)
-    if db is not None:
-      db.close()
-
   def ConnectDb(self, memory_db):
     def connector(db_file):
       db = getattr(g, '_database', None)
