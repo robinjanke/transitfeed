@@ -574,6 +574,8 @@ class Loader:
       trip._AddStopTimeObjectUnordered(stop_time, self._schedule)
       self._problems.ClearContext()
 
+    self._schedule._connection.commit()
+
     # stop_times are validated in Trip.ValidateChildren, called by
     # Schedule.Validate
 

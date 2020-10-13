@@ -106,6 +106,15 @@ class Schedule(object):
     """Return list of columns in a table."""
     return self._table_columns[table]
 
+  def __getattribute__(self,name):
+    if name == "_connection":
+      connection = getattr(g, "_connection", None)
+      if connection is None:
+        g._connection = sqlite.connect(self._temp_db_file.name, check_same_thread=True)
+      return g._connection
+    else:
+      return object.__getattribute__(self, name)
+
   def __del__(self):
     self._connection.cursor().close()
     self._connection.close()
@@ -113,29 +122,8 @@ class Schedule(object):
       os.remove(self._temp_db_filename)
 
   def ConnectDb(self, memory_db):
-    def connector(db_file):
-      db = getattr(g, '_database', None)
-      if db is None:
-        if native_sqlite:
-          db = sqlite.connect(db_file, check_same_thread=False)
-        else:
-          db = sqlite.connect("jdbc:sqlite:%s" % db_file, "", "", "org.sqlite.JDBC", check_same_thread=False)
-      return db
-
-    if memory_db:
-      self._connection = connector(":memory:")
-    else:
-      try:
-        self._temp_db_file = tempfile.NamedTemporaryFile()
-        self._connection = connector(self._temp_db_file.name)
-      except sqlite.OperationalError:
-        # Windows won't let a file be opened twice. mkstemp does not remove the
-        # file when all handles to it are closed.
-        self._temp_db_file = None
-        (fd, self._temp_db_filename) = tempfile.mkstemp(".db")
-        os.close(fd)
-        self._connection = connector(self._temp_db_filename)
-
+    self._temp_db_file = tempfile.NamedTemporaryFile()
+    self._connection = sqlite.connect(self._temp_db_file.name, check_same_thread=True)
     cursor = self._connection.cursor()
     cursor.execute("""CREATE TABLE stop_times (
                                            trip_id CHAR(50),
@@ -150,13 +138,14 @@ class Schedule(object):
                                            timepoint INTEGER);""")
     cursor.execute("""CREATE INDEX trip_index ON stop_times (trip_id);""")
     cursor.execute("""CREATE INDEX stop_index ON stop_times (stop_id);""")
+    self._connection.commit()
 
   def GetStopBoundingBox(self):
     return (min(s.stop_lat for s in self.stops.values()),
             min(s.stop_lon for s in self.stops.values()),
             max(s.stop_lat for s in self.stops.values()),
             max(s.stop_lon for s in self.stops.values()),
-           )
+            )
 
   def AddAgency(self, name, url, timezone, agency_id=None):
     """Adds an agency to this schedule."""
@@ -395,7 +384,7 @@ class Schedule(object):
     if route_id is None:
       route_id = util.FindUniqueId(self.routes)
     route = self._gtfs_factory.Route(short_name=short_name, long_name=long_name,
-                        route_type=route_type, route_id=route_id)
+                                     route_type=route_type, route_id=route_id)
     route.agency_id = self.GetDefaultAgency().agency_id
     self.AddRouteObject(route)
     return route
@@ -603,7 +592,7 @@ class Schedule(object):
     stop_list = []
     for s in self.stops.values():
       if (s.stop_lat <= north and s.stop_lat >= south and
-          s.stop_lon <= east and s.stop_lon >= west):
+              s.stop_lon <= east and s.stop_lon >= west):
         stop_list.append(s)
         if len(stop_list) == n:
           break
@@ -657,7 +646,7 @@ class Schedule(object):
     calendar_dates_string = StringIO()
     writer = util.CsvUnicodeWriter(calendar_dates_string)
     writer.writerow(
-        self._gtfs_factory.ServicePeriod._FIELD_NAMES_CALENDAR_DATES)
+      self._gtfs_factory.ServicePeriod._FIELD_NAMES_CALENDAR_DATES)
     has_data = False
     for period in self.service_periods.values():
       for row in period.GenerateCalendarDatesFieldValuesTuples():
@@ -725,7 +714,7 @@ class Schedule(object):
       writer = util.CsvUnicodeWriter(fare_string)
       writer.writerow(self._gtfs_factory.FareAttribute._FIELD_NAMES)
       writer.writerows(
-          f.GetFieldValuesTuple() for f in self.GetFareAttributeList())
+        f.GetFieldValuesTuple() for f in self.GetFareAttributeList())
       self._WriteArchiveString(archive, 'fare_attributes.txt', fare_string)
 
     # write fare rules (if applicable)
@@ -795,7 +784,7 @@ class Schedule(object):
 
       service_id_to_trips[trip.service_id] += trip_runs
       service_id_to_departures[trip.service_id] += (
-          (trip.GetCountStopTimes() - 1) * trip_runs)
+              (trip.GetCountStopTimes() - 1) * trip_runs)
 
     date_services = self.GetServicePeriodsActiveEachDate(date_start, date_end)
     date_trips = []
@@ -803,7 +792,7 @@ class Schedule(object):
     for date, services in date_services:
       day_trips = sum(service_id_to_trips[s.service_id] for s in services)
       day_departures = sum(
-          service_id_to_departures[s.service_id] for s in services)
+        service_id_to_departures[s.service_id] for s in services)
       date_trips.append((date, day_trips, day_departures))
     return date_trips
 
@@ -824,7 +813,7 @@ class Schedule(object):
     agencies = self.GetAgencyList()
     for agency in agencies:
       if not util.IsEmpty(agency.agency_lang) and (
-          not self.feed_info.feed_lang == agency.agency_lang):
+              not self.feed_info.feed_lang == agency.agency_lang):
         problems.InvalidValue("feed_lang",
                               "The languages specified in feedinfo.txt and in "
                               "agency.txt for agency with ID %s differ." %
@@ -848,8 +837,8 @@ class Schedule(object):
     """
     warning_cutoff = today + datetime.timedelta(days=60)
     if last_date < warning_cutoff:
-        problems.ExpirationDate(time.mktime(last_date.timetuple()),
-                                last_date_origin)
+      problems.ExpirationDate(time.mktime(last_date.timetuple()),
+                              last_date_origin)
 
     if first_date > today:
       problems.FutureService(time.mktime(first_date.timetuple()),
@@ -893,14 +882,14 @@ class Schedule(object):
     for day_date, day_trips, _ in departures:
       if day_trips == 0:
         if consecutive_days_without_service == 0:
-            first_day_without_service = day_date
+          first_day_without_service = day_date
         consecutive_days_without_service += 1
         last_day_without_service = day_date
       else:
         if consecutive_days_without_service >= service_gap_interval:
-            problems.TooManyDaysWithoutService(first_day_without_service,
-                                               last_day_without_service,
-                                               consecutive_days_without_service)
+          problems.TooManyDaysWithoutService(first_day_without_service,
+                                             last_day_without_service,
+                                             consecutive_days_without_service)
 
         consecutive_days_without_service = 0
 
@@ -940,46 +929,46 @@ class Schedule(object):
       problems.OtherProblem('This feed has no effective service dates!',
                             type=problems_module.TYPE_WARNING)
     else:
-        try:
-          last_service_day = datetime.datetime(
-              *(time.strptime(end_date, "%Y%m%d")[0:6])).date()
-          first_service_day = datetime.datetime(
-              *(time.strptime(start_date, "%Y%m%d")[0:6])).date()
+      try:
+        last_service_day = datetime.datetime(
+          *(time.strptime(end_date, "%Y%m%d")[0:6])).date()
+        first_service_day = datetime.datetime(
+          *(time.strptime(start_date, "%Y%m%d")[0:6])).date()
 
-        except ValueError:
-          # Format of start_date and end_date checked in class ServicePeriod
-          pass
+      except ValueError:
+        # Format of start_date and end_date checked in class ServicePeriod
+        pass
 
-        else:
-          self.ValidateServiceExceptions(problems,
-                                         first_service_day,
-                                         last_service_day)
-          self.ValidateFeedStartAndExpirationDates(problems,
-                                                   first_service_day,
-                                                   last_service_day,
-                                                   start_date_origin,
-                                                   end_date_origin,
-                                                   today)
+      else:
+        self.ValidateServiceExceptions(problems,
+                                       first_service_day,
+                                       last_service_day)
+        self.ValidateFeedStartAndExpirationDates(problems,
+                                                 first_service_day,
+                                                 last_service_day,
+                                                 start_date_origin,
+                                                 end_date_origin,
+                                                 today)
 
-          # We start checking for service gaps a bit in the past if the
-          # feed was active then. See
-          # https://github.com/google/transitfeed/issues/188
-          #
-          # We subtract 1 from service_gap_interval so that if today has
-          # service no warning is issued.
-          #
-          # Service gaps are searched for only up to one year from today
-          if service_gap_interval is not None:
-            service_gap_timedelta = datetime.timedelta(
-                                        days=service_gap_interval - 1)
-            one_year = datetime.timedelta(days=365)
-            self.ValidateServiceGaps(
-                problems,
-                max(first_service_day,
-                    today - service_gap_timedelta),
-                min(last_service_day,
-                    today + one_year),
-                service_gap_interval)
+        # We start checking for service gaps a bit in the past if the
+        # feed was active then. See
+        # https://github.com/google/transitfeed/issues/188
+        #
+        # We subtract 1 from service_gap_interval so that if today has
+        # service no warning is issued.
+        #
+        # Service gaps are searched for only up to one year from today
+        if service_gap_interval is not None:
+          service_gap_timedelta = datetime.timedelta(
+            days=service_gap_interval - 1)
+          one_year = datetime.timedelta(days=365)
+          self.ValidateServiceGaps(
+            problems,
+            max(first_service_day,
+                today - service_gap_timedelta),
+            min(last_service_day,
+                today + one_year),
+            service_gap_interval)
 
   def ValidateStops(self, problems, validate_children):
     # Check for stops that aren't referenced by any trips and broken
@@ -993,9 +982,9 @@ class Schedule(object):
                      (stop.stop_id,))
       count = cursor.fetchone()[0]
       if stop.location_type == 0 and count == 0:
-          problems.UnusedStop(stop.stop_id, stop.stop_name)
+        problems.UnusedStop(stop.stop_id, stop.stop_name)
       elif stop.location_type == 1 and count != 0:
-          problems.UsedStation(stop.stop_id, stop.stop_name)
+        problems.UsedStation(stop.stop_id, stop.stop_name)
 
       if stop.location_type != 1 and stop.parent_station:
         if stop.parent_station not in self.stops:
@@ -1018,13 +1007,13 @@ class Schedule(object):
           if distance is not None:
             if distance > problems_module.MAX_DISTANCE_BETWEEN_STOP_AND_PARENT_STATION_ERROR:
               problems.StopTooFarFromParentStation(
-                  stop.stop_id, stop.stop_name, parent_station.stop_id,
-                  parent_station.stop_name, distance, problems_module.TYPE_ERROR)
+                stop.stop_id, stop.stop_name, parent_station.stop_id,
+                parent_station.stop_name, distance, problems_module.TYPE_ERROR)
             elif distance > problems_module.MAX_DISTANCE_BETWEEN_STOP_AND_PARENT_STATION_WARNING:
               problems.StopTooFarFromParentStation(
-                  stop.stop_id, stop.stop_name, parent_station.stop_id,
-                  parent_station.stop_name, distance,
-                  problems_module.TYPE_WARNING)
+                stop.stop_id, stop.stop_name, parent_station.stop_id,
+                parent_station.stop_name, distance,
+                problems_module.TYPE_WARNING)
 
   def ValidateNearbyStops(self, problems):
     # Check for stops that might represent the same location (specifically,
@@ -1036,7 +1025,7 @@ class Schedule(object):
     sorted_stops = filter(lambda s: s.stop_lat and s.stop_lon,
                           self.GetStopList())
     sorted_stops.sort(
-        key=(lambda x: [x.stop_lat, x.stop_lon, getattr(x, 'stop_id', None)]))
+      key=(lambda x: [x.stop_lat, x.stop_lon, getattr(x, 'stop_id', None)]))
     TWO_METERS_LAT = 0.000018
     for index, stop in enumerate(sorted_stops[:-1]):
       index += 1
@@ -1048,16 +1037,16 @@ class Schedule(object):
           other_stop = sorted_stops[index]
           if stop.location_type == 0 and other_stop.location_type == 0:
             problems.StopsTooClose(
-                util.EncodeUnicode(stop.stop_name),
-                util.EncodeUnicode(stop.stop_id),
-                util.EncodeUnicode(other_stop.stop_name),
-                util.EncodeUnicode(other_stop.stop_id), distance)
+              util.EncodeUnicode(stop.stop_name),
+              util.EncodeUnicode(stop.stop_id),
+              util.EncodeUnicode(other_stop.stop_name),
+              util.EncodeUnicode(other_stop.stop_id), distance)
           elif stop.location_type == 1 and other_stop.location_type == 1:
             problems.StationsTooClose(
-                util.EncodeUnicode(stop.stop_name),
-                util.EncodeUnicode(stop.stop_id),
-                util.EncodeUnicode(other_stop.stop_name),
-                util.EncodeUnicode(other_stop.stop_id), distance)
+              util.EncodeUnicode(stop.stop_name),
+              util.EncodeUnicode(stop.stop_id),
+              util.EncodeUnicode(other_stop.stop_name),
+              util.EncodeUnicode(other_stop.stop_id), distance)
           elif (stop.location_type in (0, 1) and
                 other_stop.location_type  in (0, 1)):
             if stop.location_type == 0 and other_stop.location_type == 1:
@@ -1068,10 +1057,10 @@ class Schedule(object):
               this_station = stop
             if this_stop.parent_station != this_station.stop_id:
               problems.DifferentStationTooClose(
-                  util.EncodeUnicode(this_stop.stop_name),
-                  util.EncodeUnicode(this_stop.stop_id),
-                  util.EncodeUnicode(this_station.stop_name),
-                  util.EncodeUnicode(this_station.stop_id), distance)
+                util.EncodeUnicode(this_stop.stop_name),
+                util.EncodeUnicode(this_stop.stop_id),
+                util.EncodeUnicode(this_station.stop_name),
+                util.EncodeUnicode(this_station.stop_id), distance)
         index += 1
 
   def ValidateRouteNames(self, problems, validate_children):
@@ -1120,14 +1109,14 @@ class Schedule(object):
         stop_ids.append(stop_id)
         # Check a stop if which belongs to both subway and bus.
         if (route_type == self._gtfs_factory.Route._ROUTE_TYPE_NAMES['Subway'] or
-            route_type == self._gtfs_factory.Route._ROUTE_TYPE_NAMES['Bus']):
+                route_type == self._gtfs_factory.Route._ROUTE_TYPE_NAMES['Bus']):
           if stop_id not in stop_types:
             stop_types[stop_id] = [trip.route_id, route_type, 0]
           elif (stop_types[stop_id][1] != route_type and
                 stop_types[stop_id][2] == 0):
             stop_types[stop_id][2] = 1
             if stop_types[stop_id][1] == \
-                self._gtfs_factory.Route._ROUTE_TYPE_NAMES['Subway']:
+                    self._gtfs_factory.Route._ROUTE_TYPE_NAMES['Subway']:
               subway_route_id = stop_types[stop_id][0]
               bus_route_id = trip.route_id
             else:
@@ -1184,19 +1173,19 @@ class Schedule(object):
       # very likely (a stop every 10 seconds?).  In practice, this warning
       # affects about 0.5% of current GTFS trips.
       if (prev_departure_secs != -1 and
-          consecutive_stop_times_with_fully_specified_same_time > 5):
+              consecutive_stop_times_with_fully_specified_same_time > 5):
         problems.TooManyConsecutiveStopTimesWithSameTime(trip.trip_id,
-            consecutive_stop_times_with_fully_specified_same_time,
-            prev_departure_secs)
+                                                         consecutive_stop_times_with_fully_specified_same_time,
+                                                         prev_departure_secs)
     for index, st in enumerate(stop_times):
       if st.arrival_secs is None or st.departure_secs is None:
         consecutive_stop_times_with_potentially_same_time += 1
         continue
       if (prev_departure_secs == st.arrival_secs and
-        st.arrival_secs == st.departure_secs):
+              st.arrival_secs == st.departure_secs):
         consecutive_stop_times_with_potentially_same_time += 1
         consecutive_stop_times_with_fully_specified_same_time = (
-            consecutive_stop_times_with_potentially_same_time)
+          consecutive_stop_times_with_potentially_same_time)
       else:
         CheckSameTimeCount()
         consecutive_stop_times_with_potentially_same_time = 1
@@ -1295,7 +1284,7 @@ class Schedule(object):
     # Check that routes' agency IDs are valid, if set
     for route in self.routes.values():
       if (not util.IsEmpty(route.agency_id) and
-          not route.agency_id in self._agencies):
+              not route.agency_id in self._agencies):
         problems.InvalidAgencyID('agency_id', route.agency_id,
                                  'route', route.route_id)
 
